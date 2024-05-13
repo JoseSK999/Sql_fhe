@@ -1,0 +1,9 @@
+id:uint64,participant:string,score:uint64,rating:int64,grant_val:int64,research_area:string,active:bool,funded:bool
+1,"Dr. Alpha",85,4,500000,"Astrophysics",true,false
+2,"Dr. Beta",90,5,-10000,"Quantum Mechanics",true,true
+2,"Dr. Beta",18446744073709551615,5,-10000,"Quantum Mechanics",true,true
+2,"Dr. Beta",18446744073709551615,5,-10000,"Quantum Mechanics",false,true
+3,"Dr. Gamma",0,2,200000,"Microbiology",false,false
+4,"Dr. Delta",60,3,0,"Astrophysics",true,true
+5,"Dr. Delta",60,3,0,"Astrophysics",true,true
+6,"Dr. Epsilon",95,9223372036854775807,-9223372036854775808,"Cryptography",false,true

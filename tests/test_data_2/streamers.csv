@@ -1,0 +1,10 @@
+name:string,nickname:string,age:uint64,lives_in_andorra:bool
+"Samuel de Luque","Vegetta777",27,true
+"Ruben Doblas Gundersen","elrubiusOMG",34,true
+"Guillermo Diaz","WillyRex",31,true
+"Raul Alvarez Genes","AuronPlay",35,false
+"Victor Dominguez","Invictor",28,true
+"David Canovas","TheGrefg",27,true
+"Ibai Llanos","Ibai",29,false
+"Joaquin Dominguez","Xokas",33,false
+"Juan Alberto","Illojuan",29,false
