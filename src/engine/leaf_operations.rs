@@ -165,39 +165,47 @@ impl EncCells {
 
 fn op_is(leaf_op: &RadixCiphertext, sk: &ServerKey) -> [BooleanBlock; 5] {
     let (((op_is_eq, op_is_lt), (op_is_gt, op_is_bt)), op_is_in) = rayon::join(
-        || rayon::join(
-            || rayon::join(
-                || sk.scalar_eq_parallelized(leaf_op, 0),
-                || sk.scalar_eq_parallelized(leaf_op, 1),
-            ),
-            || rayon::join(
-                || sk.scalar_eq_parallelized(leaf_op, 2),
-                || sk.scalar_eq_parallelized(leaf_op, 3),
-            ),
-        ),
+        || {
+            rayon::join(
+                || {
+                    rayon::join(
+                        || sk.scalar_eq_parallelized(leaf_op, 0),
+                        || sk.scalar_eq_parallelized(leaf_op, 1),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || sk.scalar_eq_parallelized(leaf_op, 2),
+                        || sk.scalar_eq_parallelized(leaf_op, 3),
+                    )
+                },
+            )
+        },
         || sk.scalar_eq_parallelized(leaf_op, 4),
     );
 
     [op_is_eq, op_is_lt, op_is_gt, op_is_bt, op_is_in]
 }
 
-fn combine_results(
-    results: &[BooleanBlock; 5],
-    op_is: &[BooleanBlock; 5],
-    sk: &ServerKey,
-) -> BooleanBlock {
+fn combine_results(results: &[BooleanBlock; 5], op_is: &[BooleanBlock; 5], sk: &ServerKey) -> BooleanBlock {
     // Combine results with their corresponding operation condition
     let (((eq_result, lt_result), (gt_result, bt_result)), in_result) = rayon::join(
-        || rayon::join(
-            || rayon::join(
-                || sk.boolean_bitand(&results[0], &op_is[0]),
-                || sk.boolean_bitand(&results[1], &op_is[1]),
-            ),
-            || rayon::join(
-                || sk.boolean_bitand(&results[2], &op_is[2]),
-                || sk.boolean_bitand(&results[3], &op_is[3]),
-            ),
-        ),
+        || {
+            rayon::join(
+                || {
+                    rayon::join(
+                        || sk.boolean_bitand(&results[0], &op_is[0]),
+                        || sk.boolean_bitand(&results[1], &op_is[1]),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || sk.boolean_bitand(&results[2], &op_is[2]),
+                        || sk.boolean_bitand(&results[3], &op_is[3]),
+                    )
+                },
+            )
+        },
         || sk.boolean_bitand(&results[4], &op_is[4]),
     );
 
@@ -218,50 +226,54 @@ fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
     sk: &ServerKey,
 ) -> BooleanBlock {
     let ((eq, lt), op_is) = rayon::join(
-        || rayon::join(
-            || sk.scalar_eq_parallelized(&enc[0].0, scalar),
-            // (cell > enc_cell) is equal to (enc_cell < cell), and so on. We have to invert
-            // the operation as the provided sk methods have the scalar on the right side
-            || sk.scalar_gt_parallelized(&enc[0].0, scalar),
-        ),
+        || {
+            rayon::join(
+                || sk.scalar_eq_parallelized(&enc[0].0, scalar),
+                // (cell > enc_cell) is equal to (enc_cell < cell), and so on. We have to invert
+                // the operation as the provided sk methods have the scalar on the right side
+                || sk.scalar_gt_parallelized(&enc[0].0, scalar),
+            )
+        },
         || op_is(leaf_op, sk),
     );
 
     let (gt, (bt, in_re)) = rayon::join(
         // If it's not eq nor lt, it's gt
         || sk.boolean_bitand(&sk.boolean_bitnot(&eq), &sk.boolean_bitnot(&lt)),
-        || rayon::join(
-            || {
-                let upper_bound = &enc[1].0;
-                let (ge_than_lower, le_than_upper) = rayon::join(
-                    // Ge is the same as NOT lt (which we have computed for the rhs.first_inner())
-                    || sk.boolean_bitnot(&lt),
-                    || sk.scalar_ge_parallelized(upper_bound, scalar),
-                );
-                sk.boolean_bitand(&ge_than_lower, &le_than_upper)
-            },
-            || {
-                // Checks if one of the encrypted cell values is equal to the scalar, ignoring padding
-                // encrypted cells
-                let matches: Vec<_> = enc
-                    .par_iter()
-                    .enumerate()
-                    .map(|(i, (enc_cell, is_not_padding))| {
-                        if i == 0 {
-                            // We have already computed eq with the first enc cell
-                            sk.boolean_bitand(&eq, is_not_padding)
-                        } else {
-                            let eq = sk.scalar_eq_parallelized(enc_cell, scalar);
-                            sk.boolean_bitand(&eq, is_not_padding)
-                        }
-                    })
-                    .collect();
+        || {
+            rayon::join(
+                || {
+                    let upper_bound = &enc[1].0;
+                    let (ge_than_lower, le_than_upper) = rayon::join(
+                        // Ge is the same as NOT lt (which we have computed for the rhs.first_inner())
+                        || sk.boolean_bitnot(&lt),
+                        || sk.scalar_ge_parallelized(upper_bound, scalar),
+                    );
+                    sk.boolean_bitand(&ge_than_lower, &le_than_upper)
+                },
+                || {
+                    // Checks if one of the encrypted cell values is equal to the scalar, ignoring padding
+                    // encrypted cells
+                    let matches: Vec<_> = enc
+                        .par_iter()
+                        .enumerate()
+                        .map(|(i, (enc_cell, is_not_padding))| {
+                            if i == 0 {
+                                // We have already computed eq with the first enc cell
+                                sk.boolean_bitand(&eq, is_not_padding)
+                            } else {
+                                let eq = sk.scalar_eq_parallelized(enc_cell, scalar);
+                                sk.boolean_bitand(&eq, is_not_padding)
+                            }
+                        })
+                        .collect();
 
-                // Convert all the bools into a single RadixCiphertext: This number will be 0 if there
-                // was no match (all false) or non-zero if there was a match (at least one true)
-                sk.scalar_ne_parallelized(&bools_into_radix(matches, sk), 0)
-            },
-        ),
+                    // Convert all the bools into a single RadixCiphertext: This number will be 0 if there
+                    // was no match (all false) or non-zero if there was a match (at least one true)
+                    sk.scalar_ne_parallelized(&bools_into_radix(matches, sk), 0)
+                },
+            )
+        },
     );
 
     let results = [eq, lt, gt, bt, in_re];
@@ -283,52 +295,61 @@ pub fn scalar_comparison(lhs: &Cell, rhs: &EncCells, leaf_op: &RadixCiphertext, 
 
 // Checks the Leaf Operation assuming the two cells are of the same type (this function is only
 // used when we know it).
-pub fn cipher_comparison(lhs: &EncCells, rhs: &EncCells, leaf_op: &RadixCiphertext, sk: &ServerKey) -> BooleanBlock {
+pub fn cipher_comparison(
+    lhs: &EncCells,
+    rhs: &EncCells,
+    leaf_op: &RadixCiphertext,
+    sk: &ServerKey,
+) -> BooleanBlock {
     let ((eq, lt), op_is) = rayon::join(
-        || rayon::join(
-            || sk.eq_parallelized(&lhs.first_inner().0, &rhs.first_inner().0),
-            || sk.lt_parallelized(&lhs.first_inner().0, &rhs.first_inner().0),
-        ),
+        || {
+            rayon::join(
+                || sk.eq_parallelized(&lhs.first_inner().0, &rhs.first_inner().0),
+                || sk.lt_parallelized(&lhs.first_inner().0, &rhs.first_inner().0),
+            )
+        },
         || op_is(leaf_op, sk),
     );
 
     let (gt, (bt, in_re)) = rayon::join(
         // If it's not eq nor lt, it's gt
         || sk.boolean_bitand(&sk.boolean_bitnot(&eq), &sk.boolean_bitnot(&lt)),
-        || rayon::join(
-            || {
-                // It's guaranteed that there are at least two encrypted cells as rhs
-                let upper_bound = &rhs.inner[1].0;
-                let (ge_than_lower, le_than_upper) = rayon::join(
-                    // Ge is the same as NOT lt (which we have computed for the rhs.first_inner())
-                    || sk.boolean_bitnot(&lt),
-                    || sk.le_parallelized(&lhs.first_inner().0, upper_bound),
-                );
-                sk.boolean_bitand(&ge_than_lower, &le_than_upper)
-            },
-            || {
-                // Checks if one of the encrypted rhs values is equal to the lhs, ignoring padding
-                // encrypted cells
-                let matches: Vec<_> = rhs
-                    .inner
-                    .par_iter()
-                    .enumerate()
-                    .map(|(i, (enc_cell, is_not_padding))| {
-                        if i == 0 {
-                            // We have already computed eq with the first enc cell
-                            sk.boolean_bitand(&eq, is_not_padding)
-                        } else {
-                            let eq = sk.eq_parallelized(&lhs.first_inner().0, enc_cell);
-                            sk.boolean_bitand(&eq, is_not_padding)
-                        }
-                    })
-                    .collect();
+        || {
+            rayon::join(
+                || {
+                    // It's guaranteed that there are at least two encrypted cells as rhs
+                    let upper_bound = &rhs.inner[1].0;
+                    let (ge_than_lower, le_than_upper) = rayon::join(
+                        // Ge is the same as NOT lt (which we have computed for the rhs.first_inner())
+                        || sk.boolean_bitnot(&lt),
+                        || sk.le_parallelized(&lhs.first_inner().0, upper_bound),
+                    );
+                    sk.boolean_bitand(&ge_than_lower, &le_than_upper)
+                },
+                || {
+                    // Checks if one of the encrypted rhs values is equal to the lhs, ignoring padding
+                    // encrypted cells
+                    let matches: Vec<_> = rhs
+                        .inner
+                        .par_iter()
+                        .enumerate()
+                        .map(|(i, (enc_cell, is_not_padding))| {
+                            if i == 0 {
+                                // We have already computed eq with the first enc cell
+                                sk.boolean_bitand(&eq, is_not_padding)
+                            } else {
+                                let eq = sk.eq_parallelized(&lhs.first_inner().0, enc_cell);
+                                sk.boolean_bitand(&eq, is_not_padding)
+                            }
+                        })
+                        .collect();
 
-                // Convert all the bools into a single RadixCiphertext: This number will be 0 if there
-                // was no match (all false) or non-zero if there was a match (at least one true)
-                sk.scalar_ne_parallelized(&bools_into_radix(matches, sk), 0)
-            }
-        ),
+                    // Convert all the bools into a single RadixCiphertext: This number will be 0 if there
+                    // was no match (all false) or non-zero if there was a match (at least one true)
+                    sk.scalar_ne_parallelized(&bools_into_radix(matches, sk), 0)
+                },
+            )
+        },
     );
 
     let results = [eq, lt, gt, bt, in_re];

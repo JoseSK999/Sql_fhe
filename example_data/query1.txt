@@ -1,0 +1,2 @@
+SELECT name FROM table_1 WHERE NOT
+age_val NOT BETWEEN 50 AND 99 AND NOT(name = '');

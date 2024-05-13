@@ -207,8 +207,6 @@ impl From<SqlSelect> for DuckDBSelect {
             params.append(&mut values);
         }
 
-        println!("SQL: {}", sql);
-
         DuckDBSelect { sql, params }
     }
 }

@@ -80,7 +80,6 @@ fn sql_create(table: &ClearTable) -> String {
     create.push_str(&columns_str);
     create.push(')');
 
-    println!("{create}");
     create
 }
 
@@ -101,6 +100,5 @@ fn sql_insert(table: &ClearTable) -> String {
     let rows_insert_str = rows_str.join(", ");
     insert.push_str(&rows_insert_str);
 
-    println!("{insert}");
     insert
 }

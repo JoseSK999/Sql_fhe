@@ -9,11 +9,7 @@ fn test_query_on_tables(query: &str, tables: Vec<ClearTable>) -> duckdb::Result<
     let (ck, sk) = gen_keys();
     let sql_select = parse_sql_select(&GenericDialect, query);
 
-    let from = sql_select
-        .from
-        .first()
-        .and_then(|t| Some(t.relation.to_string()))
-        .unwrap();
+    let from = sql_select.from.first().map(|t| t.relation.to_string()).unwrap();
     let headers = get_tables_headers(&tables);
     let table_headers = get_headers_for(&from, &headers);
     let max_col_len = get_max_col_len(&headers);
@@ -32,7 +28,6 @@ fn test_query_on_tables(query: &str, tables: Vec<ClearTable>) -> duckdb::Result<
     let enc_result = run_fhe_query(&tables, &enc_select, &sk);
     let clear_result = decrypt_selection(enc_result, &selected_columns, &table_headers, &ck);
 
-    println!("\nSQL RESULT: \n{}\nFHE RESULT: \n{}", sql_result, clear_result);
     assert_eq!(clear_result.rows(), sql_result.rows());
     Ok(())
 }

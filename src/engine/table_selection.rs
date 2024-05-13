@@ -1,6 +1,8 @@
 use crate::engine::bools_into_radix;
 use crate::engine::enc_query::EncSqlExpr;
-use crate::engine::leaf_operations::{cipher_comparison, scalar_comparison, str_to_big_uint, trivial_cell, trivial_encrypt_str, EncCells};
+use crate::engine::leaf_operations::{
+    cipher_comparison, scalar_comparison, str_to_big_uint, trivial_cell, trivial_encrypt_str, EncCells,
+};
 use crate::{Cell, ClearTable};
 use rayon::prelude::*;
 use tfhe::integer::{BooleanBlock, RadixCiphertext, ServerKey};
@@ -262,11 +264,7 @@ pub enum Table<'a> {
 impl<'a> Table<'a> {
     // Returns a bool for each row, indicating if there's a query match in it or not.
     // Evaluates the full EncSqlExpr to determine matched rows.
-    pub fn evaluate_expression(
-        &self,
-        expression: &EncSqlExpr,
-        sk: &ServerKey,
-    ) -> Vec<BooleanBlock> {
+    pub fn evaluate_expression(&self, expression: &EncSqlExpr, sk: &ServerKey) -> Vec<BooleanBlock> {
         match expression {
             EncSqlExpr::EncNode {
                 left,
@@ -325,8 +323,7 @@ impl<'a> Table<'a> {
                     Table::PartiallyEnc(partially_enc) => partially_enc.evaluate_leaf((left, op, right), sk),
                 };
                 // Again, if negated is set invert the bools, else copy them
-                vec
-                    .par_iter()
+                vec.par_iter()
                     .map(|re| sk.boolean_bitxor(re, negated))
                     .collect::<Vec<_>>()
             }
@@ -336,28 +333,22 @@ impl<'a> Table<'a> {
     // Make all the cells from the ClearTable or the PartiallyEncTable be encrypted by masking
     pub fn mask_table(&self, sk: &ServerKey) -> Vec<Vec<EncCells>> {
         match self {
-            Table::Clear(table) => {
-                table.rows()
-                    .par_iter()
-                    .map(|row| {
-                        row.par_iter().map(|cell| mask_cell(cell, None, sk)).collect()
-                    })
-                    .collect()
-            }
-            Table::PartiallyEnc(PartiallyEncTable { rows, .. }) => {
-                rows.par_iter()
-                    .map(|row| {
-                        row.par_iter().map(|enc_clear_cell| {
-                            match enc_clear_cell {
-                                EncClearCell::Enc(enc_cell) => enc_cell.clone(),
-                                EncClearCell::Clear((cell, is_selected)) => {
-                                    mask_cell(cell, Some(is_selected), sk)
-                                }
-                            }
-                        }).collect()
-                    })
-                    .collect()
-            }
+            Table::Clear(table) => table
+                .rows()
+                .par_iter()
+                .map(|row| row.par_iter().map(|cell| mask_cell(cell, None, sk)).collect())
+                .collect(),
+            Table::PartiallyEnc(PartiallyEncTable { rows, .. }) => rows
+                .par_iter()
+                .map(|row| {
+                    row.par_iter()
+                        .map(|enc_clear_cell| match enc_clear_cell {
+                            EncClearCell::Enc(enc_cell) => enc_cell.clone(),
+                            EncClearCell::Clear((cell, is_selected)) => mask_cell(cell, Some(is_selected), sk),
+                        })
+                        .collect()
+                })
+                .collect(),
         }
     }
 }
@@ -369,7 +360,7 @@ fn mask_cell(cell: &Cell, is_selected: Option<&BooleanBlock>, sk: &ServerKey) ->
 
     let max_data = sk.create_trivial_max_radix(128);
     let max_type_flag = sk.create_trivial_max_radix(1);
-    
+
     let (masked_data, masked_type_flag) = rayon::join(
         || sk.bitand_parallelized(&data, &max_data),
         || sk.bitand_parallelized(&type_flag, &max_type_flag),
@@ -382,10 +373,10 @@ fn mask_cell(cell: &Cell, is_selected: Option<&BooleanBlock>, sk: &ServerKey) ->
 
 #[cfg(test)]
 mod tests {
-    use tfhe::integer::ClientKey;
     use super::*;
     use crate::engine::leaf_operations::{decrypt_str, encrypt_str};
     use crate::gen_keys;
+    use tfhe::integer::ClientKey;
 
     fn decrypt_rows_and_selected_enc(
         partially_enc_table: PartiallyEncTable,

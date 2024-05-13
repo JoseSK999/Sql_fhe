@@ -1,3 +1,0 @@
-id:uint64,name:string,age_val:uint64,junior:bool,senior:bool,rating:uint64
-1,"Alice",30,true,false,9
-2,"Bob",45,false,true,12

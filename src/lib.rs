@@ -7,7 +7,9 @@ pub use crate::engine::enc_query::EncSqlSelect;
 pub use crate::engine::table::{AsciiStr, Cell, CellTypeId, ClearTable, ColumnDef};
 pub use crate::sql::{sql_backend::duckdb_result, DuckDBSelect, SqlSelect};
 
+use crate::engine::leaf_operations::EncCells;
 use crate::engine::table_selection::{select_table, Table};
+use rayon::prelude::*;
 use sqlparser::ast::{SetExpr, Statement};
 use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
@@ -20,7 +22,6 @@ use tfhe::shortint::parameters::{
     PARAM_MESSAGE_2_CARRY_2_KS_PBS, PARAM_MULTI_BIT_MESSAGE_2_CARRY_2_GROUP_2_KS_PBS,
 };
 use tfhe::shortint::PBSParameters;
-use crate::engine::leaf_operations::EncCells;
 
 /// Convenient function to parse an sql SELECT statement
 pub fn parse_sql_select(dialect: &dyn Dialect, sql: &str) -> sqlparser::ast::Select {
@@ -130,7 +131,10 @@ pub fn encrypt_query(
         "'column_headers' cannot be longer than 'max_col_len'",
     );
     if let Some(size) = leaf_size {
-        assert!(size >= 2, "Minimum leaf size is 2 in order to hide uses of IN / BETWEEN");
+        assert!(
+            size >= 2,
+            "Minimum leaf size is 2 in order to hide uses of IN / BETWEEN"
+        );
     }
     let clear = SqlSelect::from_sqlparser_ast(query, column_headers);
 
@@ -142,11 +146,7 @@ pub struct EncResult {
     enc_rows: Vec<Vec<EncCells>>,
 }
 
-pub fn run_fhe_query(
-    tables: &[ClearTable],
-    enc_query: &EncSqlSelect,
-    sk: &ServerKey,
-) -> EncResult {
+pub fn run_fhe_query(tables: &[ClearTable], enc_query: &EncSqlSelect, sk: &ServerKey) -> EncResult {
     let table = select_table(tables, enc_query.from(), sk);
     let where_clause = enc_query.where_clause().expect("Assuming there's a where clause");
 
@@ -159,19 +159,25 @@ pub fn run_fhe_query(
         }
     };
 
-    // Choose between the selected rows or the DISTINCT selected rows
-    selected_rows = selected_rows
-        .iter()
-        .zip(&distinct_selected_rows)
-        .map(|(s, d)| {
-            let distinct = sk.boolean_bitand(enc_query.distinct(), d);
-            let not_distinct = sk.boolean_bitand(&sk.boolean_bitnot(enc_query.distinct()), s);
+    let (_, enc_rows) = rayon::join(
+        || {
+            // Choose between the selected rows or the DISTINCT selected rows
+            selected_rows = selected_rows
+                .par_iter()
+                .zip(&distinct_selected_rows)
+                .map(|(s, d)| {
+                    let (distinct, not_distinct) = rayon::join(
+                        || sk.boolean_bitand(enc_query.distinct(), d),
+                        || sk.boolean_bitand(&sk.boolean_bitnot(enc_query.distinct()), s),
+                    );
 
-            sk.boolean_bitor(&distinct, &not_distinct)
-        })
-        .collect();
+                    sk.boolean_bitor(&distinct, &not_distinct)
+                })
+                .collect();
+        },
+        || table.mask_table(sk),
+    );
 
-    let enc_rows = table.mask_table(sk);
     EncResult {
         selected_rows,
         enc_rows,
@@ -185,7 +191,8 @@ pub fn decrypt_selection(
     column_headers: &[ColumnDef],
     ck: &ClientKey,
 ) -> ClearResult {
-    let clear_rows: Vec<Vec<Cell>> = enc_result.enc_rows
+    let clear_rows: Vec<Vec<Cell>> = enc_result
+        .enc_rows
         .iter()
         .map(|row| {
             row.iter()
