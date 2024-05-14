@@ -150,7 +150,13 @@ impl ClearTable {
 
                     match col_type {
                         "bool" => Cell::Bool(value.parse().unwrap()),
+                        "int8" => Cell::Int(value.parse::<i8>().unwrap() as i64),
+                        "int16" => Cell::Int(value.parse::<i16>().unwrap() as i64),
+                        "int32" => Cell::Int(value.parse::<i32>().unwrap() as i64),
                         "int64" => Cell::Int(value.parse().unwrap()),
+                        "uint8" => Cell::UInt(value.parse::<u8>().unwrap() as u64),
+                        "uint16" => Cell::UInt(value.parse::<u16>().unwrap() as u64),
+                        "uint32" => Cell::UInt(value.parse::<u32>().unwrap() as u64),
                         "uint64" => Cell::UInt(value.parse().unwrap()),
                         "string" => Cell::Str(value.into()),
                         _ => panic!("Unsupported type in header: {}", header),
@@ -180,8 +186,8 @@ impl ClearTable {
 
             let type_id = match column_type {
                 "bool" => CellTypeId::Bool,
-                "int64" => CellTypeId::Int,
-                "uint64" => CellTypeId::UInt,
+                "int8" | "int16" | "int32" | "int64" => CellTypeId::Int,
+                "uint8" | "uint16" | "uint32" | "uint64" => CellTypeId::UInt,
                 "string" => CellTypeId::Str,
                 _ => panic!("Invalid column type definition"),
             };

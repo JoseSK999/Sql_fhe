@@ -1,4 +1,4 @@
-id:uint64,name:string,age_val:uint64
+id:uint8,name:string,age_val:uint16
 0,"Juan Ramon Rallo",40
 1,"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",25
 2,"Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",25
