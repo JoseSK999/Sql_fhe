@@ -5,7 +5,7 @@ use crate::engine::bools_into_radix;
 use rayon::prelude::*;
 use tfhe::integer::bigint::static_unsigned::StaticUnsignedBigInt;
 use tfhe::integer::block_decomposition::DecomposableInto;
-use tfhe::integer::{BooleanBlock, ClientKey, RadixCiphertext, ServerKey};
+use tfhe::integer::{BooleanBlock, ClientKey, IntegerCiphertext, RadixCiphertext, ServerKey};
 
 // Max length of the encrypted SQL data in u64, i.e. 4 * 64 = 256 bits
 const N: usize = 4;
@@ -218,9 +218,24 @@ fn combine_results(results: &[BooleanBlock; 5], op_is: &[BooleanBlock; 5], sk: &
     sk.boolean_bitor(&sk.boolean_bitor(&eq_or_lt, &gt_or_bt), &in_result)
 }
 
+pub fn bool_block(radix: &RadixCiphertext) -> RadixCiphertext {
+    let blocks = radix.blocks();
+    assert_eq!(blocks.len(), 128);
+
+    RadixCiphertext::from(vec![blocks[0].clone()])
+}
+
+pub fn int_blocks(radix: &RadixCiphertext) -> RadixCiphertext {
+    let blocks = radix.blocks();
+    assert_eq!(blocks.len(), 128);
+
+    RadixCiphertext::from(blocks[0..32].to_vec())
+}
+
 // Helper function to get the corresponding FHE method with a generic scalar type
 fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
     scalar: Scalar,
+    is_int: bool,
     enc: &[(RadixCiphertext, BooleanBlock)],
     leaf_op: &RadixCiphertext,
     sk: &ServerKey,
@@ -228,10 +243,22 @@ fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
     let ((eq, lt), op_is) = rayon::join(
         || {
             rayon::join(
-                || sk.scalar_eq_parallelized(&enc[0].0, scalar),
+                || {
+                    if is_int {
+                        sk.scalar_eq_parallelized(&int_blocks(&enc[0].0), scalar)
+                    } else {
+                        sk.scalar_eq_parallelized(&enc[0].0, scalar)
+                    }
+                },
                 // (cell > enc_cell) is equal to (enc_cell < cell), and so on. We have to invert
                 // the operation as the provided sk methods have the scalar on the right side
-                || sk.scalar_gt_parallelized(&enc[0].0, scalar),
+                || {
+                    if is_int {
+                        sk.scalar_gt_parallelized(&int_blocks(&enc[0].0), scalar)
+                    } else {
+                        sk.scalar_gt_parallelized(&enc[0].0, scalar)
+                    }
+                },
             )
         },
         || op_is(leaf_op, sk),
@@ -247,7 +274,13 @@ fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
                     let (ge_than_lower, le_than_upper) = rayon::join(
                         // Ge is the same as NOT lt (which we have computed for the rhs.first_inner())
                         || sk.boolean_bitnot(&lt),
-                        || sk.scalar_ge_parallelized(upper_bound, scalar),
+                        || {
+                            if is_int {
+                                sk.scalar_ge_parallelized(&int_blocks(upper_bound), scalar)
+                            } else {
+                                sk.scalar_ge_parallelized(upper_bound, scalar)
+                            }
+                        },
                     );
                     sk.boolean_bitand(&ge_than_lower, &le_than_upper)
                 },
@@ -262,7 +295,11 @@ fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
                                 // We have already computed eq with the first enc cell
                                 sk.boolean_bitand(&eq, is_not_padding)
                             } else {
-                                let eq = sk.scalar_eq_parallelized(enc_cell, scalar);
+                                let eq = if is_int {
+                                    sk.scalar_eq_parallelized(&int_blocks(enc_cell), scalar)
+                                } else {
+                                    sk.scalar_eq_parallelized(enc_cell, scalar)
+                                };
                                 sk.boolean_bitand(&eq, is_not_padding)
                             }
                         })
@@ -284,11 +321,18 @@ fn generic_scalar_comparison<Scalar: DecomposableInto<u64>>(
 // used when we know it). Lhs is a cleartext cell that we convert into scalar values.
 pub fn scalar_comparison(lhs: &Cell, rhs: &EncCells, leaf_op: &RadixCiphertext, sk: &ServerKey) -> BooleanBlock {
     match lhs {
-        Cell::Bool(b) => generic_scalar_comparison::<u8>(*b as u8, &rhs.inner, leaf_op, sk),
-        Cell::Int(int) => generic_scalar_comparison::<u64>(i64_to_ordered_u64(*int), &rhs.inner, leaf_op, sk),
-        Cell::UInt(uint) => generic_scalar_comparison::<u64>(*uint, &rhs.inner, leaf_op, sk),
+        Cell::Bool(b) => {
+            // As booleans are only allowed for Eq and Ne in the query, it's enforced that this is
+            // an equality check (which could be negated at the leaf level)
+            sk.scalar_eq_parallelized(&bool_block(&rhs.first_inner().0), *b as u8)
+        }
+        Cell::Int(int) => {
+            generic_scalar_comparison::<u64>(i64_to_ordered_u64(*int), true, &rhs.inner, leaf_op, sk)
+        }
+        Cell::UInt(uint) => generic_scalar_comparison::<u64>(*uint, true, &rhs.inner, leaf_op, sk),
         Cell::Str(str) => {
-            generic_scalar_comparison::<StaticUnsignedBigInt<4>>(str_to_big_uint(str), &rhs.inner, leaf_op, sk)
+            let scalar = str_to_big_uint(str);
+            generic_scalar_comparison::<StaticUnsignedBigInt<4>>(scalar, false, &rhs.inner, leaf_op, sk)
         }
     }
 }

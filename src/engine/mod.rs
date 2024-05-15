@@ -1,4 +1,4 @@
-use crate::engine::leaf_operations::{i64_to_ordered_u64, str_to_big_uint};
+use crate::engine::leaf_operations::{bool_block, i64_to_ordered_u64, int_blocks, str_to_big_uint};
 use crate::engine::table_selection::EncClearCell;
 use crate::Cell;
 use rayon::prelude::*;
@@ -112,11 +112,7 @@ fn selected_rows_eq(
         .iter()
         .zip(first_row.0.iter().zip(second_row.0))
         .filter_map(|(is_col_selected, (row1_cell, row2_cell))| {
-            if row1_cell != row2_cell {
-                Some(is_col_selected.clone())
-            } else {
-                None
-            }
+            (row1_cell != row2_cell).then_some(is_col_selected.clone())
         })
         .collect();
 
@@ -171,15 +167,12 @@ fn selected_rows_eq_enc(
                 | (EncClearCell::Enc(enc_cell), EncClearCell::Clear((cell, selected))) => {
                     // If both cells are from the selected table, both are of the same type as they
                     // are from the same column. We don't need to compare the type flags.
+                    let data = &enc_cell.first_inner().0;
                     let ne = match cell {
-                        Cell::Bool(b) => sk.scalar_ne_parallelized(&enc_cell.first_inner().0, *b as u8),
-                        Cell::Int(int) => {
-                            sk.scalar_ne_parallelized(&enc_cell.first_inner().0, i64_to_ordered_u64(*int))
-                        }
-                        Cell::UInt(uint) => sk.scalar_ne_parallelized(&enc_cell.first_inner().0, *uint),
-                        Cell::Str(str) => {
-                            sk.scalar_ne_parallelized(&enc_cell.first_inner().0, str_to_big_uint(str))
-                        }
+                        Cell::Bool(b) => sk.scalar_ne_parallelized(&bool_block(data), *b as u8),
+                        Cell::Int(int) => sk.scalar_ne_parallelized(&int_blocks(data), i64_to_ordered_u64(*int)),
+                        Cell::UInt(uint) => sk.scalar_ne_parallelized(&int_blocks(data), *uint),
+                        Cell::Str(str) => sk.scalar_ne_parallelized(data, str_to_big_uint(str)),
                     };
                     let enc_cell_selected = &enc_cell.first_inner().1;
                     let both_selected = sk.boolean_bitand(selected, enc_cell_selected);
