@@ -148,10 +148,16 @@ pub struct EncResult {
 
 pub fn run_fhe_query(tables: &[ClearTable], enc_query: &EncSqlSelect, sk: &ServerKey) -> EncResult {
     let table = select_table(tables, enc_query.from(), sk);
-    let where_clause = enc_query.where_clause().expect("Assuming there's a where clause");
 
     // Get the bools indicating which rows are selected
-    let mut selected_rows = table.evaluate_expression(where_clause, sk);
+    let mut selected_rows = if let Some(where_expr) = enc_query.where_clause() {
+        table.evaluate_expression(where_expr, sk)
+    } else {
+        // If no where clause, all rows are selected
+        let max_rows = tables.iter().map(|t| t.rows().len()).max().unwrap();
+        vec![sk.create_trivial_boolean_block(true); max_rows]
+    };
+
     let distinct_selected_rows = match &table {
         Table::Clear(clear) => distinct(clear.rows(), enc_query.select_columns(), &selected_rows, sk),
         Table::PartiallyEnc(partially_enc) => {

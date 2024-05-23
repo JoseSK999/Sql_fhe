@@ -1,0 +1,1 @@
+SELECT DISTINCT junior, name FROM table_2

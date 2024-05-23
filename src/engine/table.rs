@@ -149,7 +149,7 @@ impl ClearTable {
                     let (_, col_type) = header.split_once(':').unwrap();
 
                     match col_type {
-                        "bool" => Cell::Bool(value.parse().unwrap()),
+                        "bool" => Cell::Bool(value.to_lowercase().parse().unwrap()),
                         "int8" => Cell::Int(value.parse::<i8>().unwrap() as i64),
                         "int16" => Cell::Int(value.parse::<i16>().unwrap() as i64),
                         "int32" => Cell::Int(value.parse::<i32>().unwrap() as i64),
